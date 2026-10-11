@@ -1,0 +1,10 @@
+# Build output
+/target/
+build.log
+
+# Third-party release zips (BmSDK) - download them yourself
+/data/
+
+# Logs and debug snapshots written while playing
+*.log
+SkateCity_pose_*.json

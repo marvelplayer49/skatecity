@@ -1,0 +1,22 @@
+[package]
+name = "skatecity"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[[bin]]
+name = "SkateCity"
+path = "src/main.rs"
+
+[dependencies]
+skate-host = { path = "../2010-rust-rewrite-mashup-src/2010-rust-rewrite-mashup-main/skate/crates/skate-host" }
+bevy = { version = "0.19", default-features = false, features = ["std"] }
+
+[profile.release]
+opt-level = 3
+lto = false
+codegen-units = 16
+panic = "unwind"
+debug = false
+
+[workspace]
