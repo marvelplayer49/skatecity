@@ -60,14 +60,134 @@ The game runs best in DirectX 9 with SkateCity. If it crashes on the menu, set
 `AllowD3D11=False` in
 `Documents\WB Games\Batman Arkham City GOTY\BmGame\Config\BmEngine.ini`.
 
-## Install
+## Install, step by step
 
-1. Get everything in [What you need](#what-you-need).
-2. If the game isn't in the default Steam folder, edit the `GAME` line at the top
-   of `build.bat`.
-3. Run `build.bat`. It builds the helper (`SkateCity.exe`) and copies it, the game
-   script and the settings into the game.
-4. Start the game, load your save and wait for **SkateCity ready**, then press **K**.
+These steps assume Windows, the Steam copy of the game, and that you're putting
+everything in your `Downloads` folder. Other places work too; see the notes in
+each step.
+
+### 1. Set up the game
+
+1. Install **Batman: Arkham City Game of the Year Edition** from Steam.
+2. Start it once, get past the menus into the game, then quit. This creates the
+   game's settings files.
+3. If you use the **Split-Screen Mod**, turn it off. It crashes when SkateCity is
+   also running. `splitscreen_on_off.bat` in this repo switches it on and off.
+
+### 2. Install Rust
+
+SkateCity's helper is written in Rust and is built on your PC.
+
+1. Go to [rustup.rs](https://rustup.rs) and download `rustup-init.exe`.
+2. Run it and accept the defaults. If it offers to install the **Visual Studio C++
+   build tools**, say yes: Rust needs them on Windows.
+3. Close and reopen any open command windows afterwards.
+
+### 3. Install BmSDK
+
+[BmSDK](https://github.com/Team-BmSDK/BmSDK-AC) lets the game run C# scripts, and
+SkateCity's game side is one of those scripts.
+
+1. Open BmSDK's [releases page](https://github.com/Team-BmSDK/BmSDK-AC/releases)
+   and download **version 0.21.0 or newer**. Older versions don't run on the
+   Steam copy.
+2. Install it as its own instructions say. It goes into the game's main folder,
+   the one that contains `Binaries` and `BmGame`. On Steam that's
+   `C:\Program Files (x86)\Steam\steamapps\common\Batman Arkham City GOTY`.
+
+   Or skip installing it yourself: in step 5, make a `data` folder inside the
+   SkateCity folder, put the BmSDK release zips there named `bmsdk0.zip`,
+   `bmsdk1.zip`, … and `build.bat` installs them for you.
+
+### 4. Get the Skate 3 engine and your Skate 3 data
+
+The skating comes from the **2010-Rust-Rewrite-Mashup** project, which you need in
+two forms:
+
+1. **Its source code**, for building against. Unzip it in `Downloads` so this
+   folder exists:
+   `Downloads\2010-rust-rewrite-mashup-src\2010-rust-rewrite-mashup-main\`
+2. **Its Windows release, with your Skate 3 data** dumped from your own disc as the
+   project describes. Unzip it in `Downloads` so this folder exists:
+   `Downloads\2010-Rust-Rewrite-Mashup-windows-x64\2010-Rust-Rewrite-Mashup\skate-data\assets\`
+
+   If you put the release somewhere else, you'll point SkateCity at it in step 8.
+
+### 5. Download SkateCity
+
+1. At the top of this page, click **Code** → **Download ZIP**.
+2. Unzip it into `Downloads`, and rename the folder it makes (`skatecity-main`)
+   to `SkateCity`.
+
+Your `Downloads` folder should now look like this:
+
+```
+Downloads\
+├── SkateCity\                              <- this repo
+│   ├── build.bat
+│   ├── game\
+│   └── src\
+├── 2010-rust-rewrite-mashup-src\
+│   └── 2010-rust-rewrite-mashup-main\      <- engine source
+└── 2010-Rust-Rewrite-Mashup-windows-x64\
+    └── 2010-Rust-Rewrite-Mashup\
+        └── skate-data\assets\              <- your Skate 3 data
+```
+
+SkateCity and the engine source must sit side by side like this, because the
+build finds the engine through `..\2010-rust-rewrite-mashup-src`.
+
+### 6. If your game isn't in the default Steam folder
+
+Right-click `build.bat` → **Edit** and change the `GAME` line at the top to your
+game folder (the one containing `Binaries` and `BmGame`). Save it.
+
+### 7. Build and install
+
+1. Double-click `build.bat` in the SkateCity folder.
+2. Wait. The **first build compiles the whole skate engine and can take 5–15
+   minutes**; later builds take a minute or two.
+3. When it says **Done**, press a key to close it.
+
+`build.bat` builds `SkateCity.exe` and copies it, the game script and the
+settings into the game. If it says **BUILD FAILED**, the full error is in
+`build.log` in the SkateCity folder.
+
+### 8. Point SkateCity at your Skate 3 data (only if it's not in Downloads)
+
+Open `Binaries\Win32\SkateCity\SkateCity.ini` inside the game folder. Find the
+`skate_assets` line, remove the `;` at its start, and give the full path to your
+`skate-data\assets` folder. Save it.
+
+### 9. Play
+
+1. Plug in an Xbox-style controller.
+2. Start Batman: Arkham City from Steam and load your save.
+3. Wait for the message **SkateCity ready** in the lower left. Loading the Skate
+   3 data takes a few seconds the first time.
+4. Press **K** on the keyboard, or click both sticks in, to get on the board.
+   Press it again to get off. The full controls are in [Controls](#controls).
+
+### If the game crashes
+
+- **On the menu or on loading:** switch the game to DirectX 9. Open
+  `Documents\WB Games\Batman Arkham City GOTY\BmGame\Config\BmEngine.ini`, find
+  `AllowD3D11` and set it to `AllowD3D11=False`.
+- **With other mods installed:** turn them off and try again. The Split-Screen
+  Mod is known to crash alongside SkateCity.
+- **Otherwise:** check the [logs](#logs).
+
+### Updating
+
+Download the new ZIP, replace the files in your SkateCity folder, and run
+`build.bat` again. Your settings file in the game folder is kept.
+
+### Uninstalling
+
+Delete these from the game folder:
+
+- `Binaries\Win32\SkateCity\` (the whole folder)
+- `BmGame\Scripts\SkateCity.cs`
 
 ## Settings
 
