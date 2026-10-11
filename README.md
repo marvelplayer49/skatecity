@@ -6,7 +6,7 @@ buildings with his cape and land back on the board.
 
 The skating is the real Skate 3 simulation: the physics, trick system and animation
 run in the skate engine from the
-[2010-Rust-Rewrite-Mashup](#what-you-need) project, and Batman is posed from the
+[2010-Rust-Rewrite-Mashup](https://github.com/chasmlol/2010-rust-rewrite-mashup) project, and Batman is posed from the
 skater every frame.
 
 > Fan project. Not affiliated with or endorsed by Warner Bros., Rocksteady or
@@ -45,7 +45,8 @@ Skating needs an Xbox-style controller.
   scripting SDK for the game. 0.21.0 is the first version that runs on the Steam
   copy. Install it into the game, or put its release zips in a `data` folder here
   as `bmsdk*.zip` and `build.bat` installs them for you.
-- **The 2010-Rust-Rewrite-Mashup skate engine.** You need two parts of it:
+- **The [2010-Rust-Rewrite-Mashup](https://github.com/chasmlol/2010-rust-rewrite-mashup) skate engine** (by chasmlol). You need two
+  parts of it:
   - its source, placed next to this folder as
     `..\2010-rust-rewrite-mashup-src\2010-rust-rewrite-mashup-main\`, which
     `build.bat` compiles against;
@@ -101,14 +102,17 @@ SkateCity's game side is one of those scripts.
 
 ### 4. Get the Skate 3 engine and your Skate 3 data
 
-The skating comes from the **2010-Rust-Rewrite-Mashup** project, which you need in
-two forms:
+The skating comes from chasmlol's
+**[2010-Rust-Rewrite-Mashup](https://github.com/chasmlol/2010-rust-rewrite-mashup)** project, which you need in two forms:
 
-1. **Its source code**, for building against. Unzip it in `Downloads` so this
-   folder exists:
+1. **Its source code**, for building against. On
+   [its GitHub page](https://github.com/chasmlol/2010-rust-rewrite-mashup), click **Code** → **Download ZIP**. Make a folder
+   called `2010-rust-rewrite-mashup-src` in `Downloads` and unzip the ZIP into
+   it, so this folder exists:
    `Downloads\2010-rust-rewrite-mashup-src\2010-rust-rewrite-mashup-main\`
-2. **Its Windows release, with your Skate 3 data** dumped from your own disc as the
-   project describes. Unzip it in `Downloads` so this folder exists:
+2. **Its Windows release, with your Skate 3 data** dumped from your own disc. Get
+   the Windows release from the project's page and set up the Skate 3 data the
+   way its README describes. Unzip it in `Downloads` so this folder exists:
    `Downloads\2010-Rust-Rewrite-Mashup-windows-x64\2010-Rust-Rewrite-Mashup\skate-data\assets\`
 
    If you put the release somewhere else, you'll point SkateCity at it in step 8.
