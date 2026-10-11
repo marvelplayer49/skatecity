@@ -45,14 +45,17 @@ Skating needs an Xbox-style controller.
   scripting SDK for the game. 0.21.0 is the first version that runs on the Steam
   copy. Install it into the game, or put its release zips in a `data` folder here
   as `bmsdk*.zip` and `build.bat` installs them for you.
-- **The [2010-Rust-Rewrite-Mashup](https://github.com/chasmlol/2010-rust-rewrite-mashup) skate engine** (by chasmlol). You need two
+- **The [2010-Rust-Rewrite-Mashup](https://github.com/chasmlol/2010-rust-rewrite-mashup) skate engine** by chasmlol. You need two
   parts of it:
   - its source, placed next to this folder as
     `..\2010-rust-rewrite-mashup-src\2010-rust-rewrite-mashup-main\`, which
     `build.bat` compiles against;
-  - its release with your Skate 3 data, unzipped in `Downloads` as
-    `2010-Rust-Rewrite-Mashup-windows-x64\2010-Rust-Rewrite-Mashup\skate-data\assets`.
-    If it's somewhere else, set `skate_assets` in `SkateCity.ini`.
+  - its Windows release (`IW4L-Skate-windows-x64.zip`), set up once with your
+    Skate 3 data so it makes its `skate-data` folder.
+- **Skate 3 for Xbox 360**: your own copy's extracted `default.xex` and its `data`
+  folder (not the ISO). The mashup's setup copies out only what skating needs.
+- **Modern Warfare 2** (Steam), because the mashup's one-time setup asks for it
+  before it sets up Skate 3.
 - **Rust**, from [rustup.rs](https://rustup.rs).
 - If you use the Split-Screen Mod, turn it off: it crashes alongside SkateCity.
   `splitscreen_on_off.bat` switches it.
@@ -103,19 +106,35 @@ SkateCity's game side is one of those scripts.
 ### 4. Get the Skate 3 engine and your Skate 3 data
 
 The skating comes from chasmlol's
-**[2010-Rust-Rewrite-Mashup](https://github.com/chasmlol/2010-rust-rewrite-mashup)** project, which you need in two forms:
+**[2010-Rust-Rewrite-Mashup](https://github.com/chasmlol/2010-rust-rewrite-mashup)** project, which you need in two forms.
 
-1. **Its source code**, for building against. On
-   [its GitHub page](https://github.com/chasmlol/2010-rust-rewrite-mashup), click **Code** → **Download ZIP**. Make a folder
-   called `2010-rust-rewrite-mashup-src` in `Downloads` and unzip the ZIP into
-   it, so this folder exists:
+**Its source code**, which SkateCity is built against:
+
+1. On [its GitHub page](https://github.com/chasmlol/2010-rust-rewrite-mashup), click **Code** → **Download ZIP**.
+2. Make a folder called `2010-rust-rewrite-mashup-src` in `Downloads` and unzip
+   the ZIP into it, so this folder exists:
    `Downloads\2010-rust-rewrite-mashup-src\2010-rust-rewrite-mashup-main\`
-2. **Its Windows release, with your Skate 3 data** dumped from your own disc. Get
-   the Windows release from the project's page and set up the Skate 3 data the
-   way its README describes. Unzip it in `Downloads` so this folder exists:
+
+**Its Windows release, set up with your Skate 3 data**, which SkateCity reads the
+skater, animations and physics settings from:
+
+1. You need **Skate 3 for Xbox 360**, extracted from your own copy: its
+   `default.xex` with the `data` folder next to it. An ISO file on its own doesn't
+   work. The project's
+   [Skate 3 notes](https://github.com/chasmlol/2010-rust-rewrite-mashup/blob/main/docs/SKATE.md) show the layout.
+2. From the project's [Releases page](https://github.com/chasmlol/2010-rust-rewrite-mashup/releases/latest), download
+   `IW4L-Skate-windows-x64.zip`.
+3. Make a folder `Downloads\2010-Rust-Rewrite-Mashup-windows-x64\2010-Rust-Rewrite-Mashup`
+   and extract the zip into it. Any folder you can write to works (not Program
+   Files), but this one needs no extra settings later.
+4. Double-click `iw4l.exe` in that folder. It asks for your MW2 folder, then
+   whether you have Skate 3: choose **Yes** and select your `default.xex`. It
+   copies what skating needs into a `skate-data` folder next to `iw4l.exe`.
+5. Close it once the menu opens. You should now have:
    `Downloads\2010-Rust-Rewrite-Mashup-windows-x64\2010-Rust-Rewrite-Mashup\skate-data\assets\`
 
-   If you put the release somewhere else, you'll point SkateCity at it in step 8.
+If you put the release somewhere else, you'll point SkateCity at its
+`skate-data\assets` folder in step 8.
 
 ### 5. Download SkateCity
 
@@ -235,3 +254,10 @@ If something goes wrong, check these logs in the game's `Binaries\Win32` folder:
 
 - `SkateCity\SkateCity.log` is the helper's log.
 - `BmSDK.log` has the game script's messages.
+
+## Credits
+
+- The skate engine is [2010-Rust-Rewrite-Mashup](https://github.com/chasmlol/2010-rust-rewrite-mashup) by chasmlol, a fork of
+  [IW4L](https://github.com/vladtrc/iw4L) by vladtrc (Apache License 2.0).
+  SkateCity builds against it rather than bundling it.
+- [BmSDK](https://github.com/Team-BmSDK/BmSDK-AC) by Team-BmSDK runs the game script.
