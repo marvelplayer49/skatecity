@@ -70,8 +70,9 @@ public sealed unsafe class SkateLink
     const int RpSeq = 0, RpState = 4, RpFlags = 8, RpPawnLoc = 12, RpPawnRot = 24, RpCamLoc = 36, RpCamRot = 48,
         RpBatch = 64, RpRayCount = 68, RpBoneCount = 72, RpMsgSeq = 76, RpBoardCount = 80, RpBoard = 84,
         RpMsg = 372, RpScore = 628, RpToggleKey = 760, RpGlideVel = 764, RpGlideSeq = 776, RpGlideEndSeq = 780,
-        RpHudPoints = 784, RpHudTotal = 788, RpResultSeq = 792, RpResultKind = 796, RpResultPoints = 800, RpResultText = 804, RpBoardMore = 932;
-    const uint ResultClean = 1, ResultSketchy = 3, ResultBailed = 4;
+        RpHudPoints = 784, RpHudTotal = 788, RpResultSeq = 792, RpResultKind = 796, RpResultPoints = 800, RpResultText = 804, RpBoardMore = 932,
+        RpSoundCount = 1004, RpSounds = 1012, SoundSlots = 8;
+    const uint ResultClean = 1, ResultSketchy = 3, ResultBailed = 4, ResultSlam = 5;
     const uint PawnValid = 1, SkeletonValid = 2;
     const uint SetPawn = 1, SetCamera = 2, SetBones = 4, SetBoard = 8, Skating = 16;
     const uint StateFailed = 4;
@@ -110,6 +111,11 @@ public sealed unsafe class SkateLink
     StaticMesh? _cube, _round;
     Vector3 _roundExtent;
     readonly MaterialInterface?[] _boardMaterials = new MaterialInterface?[3];
+    // Sounds: the helper's running count of sound events, and the game's
+    // cue for each kind (1 pop, 2 land, 3 grind, 4 hit, 5 hard hit, 6 break).
+    uint _soundSeen;
+    bool _soundSynced, _soundsSearched;
+    readonly SoundCue?[] _cues = new SoundCue?[7];
     bool _cubeSearched;
     bool _badCountLogged;
     IntPtr _stableMesh;
@@ -656,6 +662,9 @@ public sealed unsafe class SkateLink
             Debug.Log("SkateCity: the skate engine failed to load - see SkateCity.log");
         }
 
+        Step(19);
+        PlaySounds(pawn);
+
         // Cast the rays the helper asked for; the answers go back next frame.
         Step(11);
         var batch = R32(Rep + RpBatch);
@@ -741,6 +750,177 @@ public sealed unsafe class SkateLink
         {
             PlaceBoard((int)R32(Rep + RpBoardCount));
         }
+    }
+
+    /// Plays the sounds the helper asked for since last frame.
+    void PlaySounds(RPawnPlayer? pawn)
+    {
+        var count = R32(Rep + RpSoundCount);
+        if (!_soundSynced)
+        {
+            _soundSynced = true;
+            _soundSeen = count;
+            return;
+        }
+        if (count == _soundSeen)
+        {
+            return;
+        }
+        // The helper restarted: its count started again.
+        if (count < _soundSeen)
+        {
+            _soundSeen = count;
+            return;
+        }
+        var from = Math.Max(_soundSeen, count - SoundSlots);
+        _soundSeen = count;
+        if (pawn == null || !pawn.IsValid)
+        {
+            return;
+        }
+        if (!_soundsSearched)
+        {
+            _soundsSearched = true;
+            FindSounds();
+        }
+        for (var n = from; n < count; n++)
+        {
+            var o = Rep + RpSounds + (int)(n % SoundSlots) * 16;
+            var kind = (int)R32(o);
+            if (kind <= 0 || kind >= _cues.Length || _cues[kind] is not { } cue || !cue.IsValid)
+            {
+                continue;
+            }
+            try
+            {
+                pawn.PlaySound(cue, true, false, false, RV(o + 4));
+            }
+            catch (Exception e)
+            {
+                Debug.Log($"SkateCity: playing a sound: {e.Message}");
+                _cues[kind] = null;
+            }
+        }
+    }
+
+    /// The game's own sound cues for skating, found by name (and logged),
+    /// unless SkateCity.ini names one (sound_pop, sound_land, sound_grind,
+    /// sound_hit, sound_hard_hit, sound_break; "none" for silence).
+    void FindSounds()
+    {
+        string[] keys = { "", "sound_pop", "sound_land", "sound_grind", "sound_hit", "sound_hard_hit", "sound_break" };
+        (string Word, int Score)[][] words =
+        {
+            Array.Empty<(string, int)>(),
+            new[] { ("skate", 5), ("board", 3), ("wood", 3), ("plank", 3), ("crate", 2), ("knock", 2), ("jump", 2), ("tap", 1) },
+            new[] { ("land", 4), ("thud", 3), ("drop", 2), ("heavy", 1), ("foot", 1), ("impact", 1) },
+            new[] { ("grind", 5), ("scrape", 4), ("slide", 3), ("rail", 2), ("metal", 2), ("pipe", 1) },
+            new[] { ("punch", 3), ("hit", 3), ("body", 3), ("impact", 2), ("fall", 2), ("light", 1) },
+            new[] { ("bodyfall", 5), ("slam", 4), ("crash", 3), ("impact", 3), ("heavy", 3), ("body", 2) },
+            new[] { ("bonebreak", 6), ("bone", 5), ("crack", 4), ("snap", 4), ("break", 3) },
+        };
+        string[] avoid = { "music", "mus_", "vo_", "dialog", "dlg", "amb", "loop", "_lp", "ui_", "menu", "speech", "voice",
+            "radio", "stinger", "cine", "vox", "riddler", "joker", "tv_", "alarm" };
+        var overrides = ReadIni(keys);
+        var best = new (int Score, SoundCue? Cue, string Path)[keys.Length];
+        var seen = new List<string>[keys.Length];
+        for (var k = 0; k < keys.Length; k++)
+        {
+            seen[k] = new List<string>();
+        }
+        try
+        {
+            foreach (var cue in Game.FindObjects<SoundCue>())
+            {
+                if (cue == null || !cue.IsValid)
+                {
+                    continue;
+                }
+                var path = cue.GetPathName();
+                var lower = path.ToLowerInvariant();
+                if (avoid.Any(lower.Contains))
+                {
+                    continue;
+                }
+                for (var k = 1; k < keys.Length; k++)
+                {
+                    var score = words[k].Where(x => lower.Contains(x.Word)).Sum(x => x.Score);
+                    if (score <= 0)
+                    {
+                        continue;
+                    }
+                    if (seen[k].Count < 12)
+                    {
+                        seen[k].Add(path);
+                    }
+                    if (score > best[k].Score || (score == best[k].Score && path.Length < best[k].Path.Length))
+                    {
+                        best[k] = (score, cue, path);
+                    }
+                }
+            }
+        }
+        catch (Exception e)
+        {
+            Debug.Log($"SkateCity: sound search failed: {e.Message}");
+        }
+        for (var k = 1; k < keys.Length; k++)
+        {
+            SoundCue? chosen = null;
+            var from = "";
+            if (overrides[k] is { } path)
+            {
+                if (path.Equals("none", StringComparison.OrdinalIgnoreCase))
+                {
+                    Debug.Log($"SkateCity: {keys[k]}: off (from the ini)");
+                    continue;
+                }
+                try
+                {
+                    chosen = Game.FindObject<SoundCue>(path) ?? GameObject.DynamicLoadObject(path, SoundCue.StaticClass(), true) as SoundCue;
+                    from = chosen != null ? $"{path} (from the ini)" : "";
+                }
+                catch
+                {
+                }
+            }
+            if (chosen == null && best[k].Cue != null)
+            {
+                chosen = best[k].Cue;
+                from = best[k].Path;
+            }
+            _cues[k] = chosen;
+            Debug.Log($"SkateCity: {keys[k]}: {(chosen != null ? from : "none found")}; candidates: {string.Join(" ; ", seen[k])}");
+        }
+    }
+
+    /// Values for `keys` from SkateCity.ini next to the helper (null if unset).
+    static string?[] ReadIni(string[] keys)
+    {
+        var values = new string?[keys.Length];
+        try
+        {
+            var ini = Path.Combine(Path.GetDirectoryName(Environment.ProcessPath) ?? ".", "SkateCity", "SkateCity.ini");
+            foreach (var line in File.Exists(ini) ? File.ReadAllLines(ini) : Array.Empty<string>())
+            {
+                var eq = line.IndexOf('=');
+                if (eq < 0 || line.TrimStart().StartsWith(";"))
+                {
+                    continue;
+                }
+                var k = Array.IndexOf(keys, line[..eq].Trim().ToLowerInvariant());
+                var value = line[(eq + 1)..].Trim();
+                if (k >= 0 && value.Length > 0)
+                {
+                    values[k] = value;
+                }
+            }
+        }
+        catch (Exception e)
+        {
+            Debug.Log($"SkateCity: reading SkateCity.ini: {e.Message}");
+        }
+        return values;
     }
 
     /// LB in the air: the helper has stopped skating; open Batman's cape with
@@ -1222,7 +1402,8 @@ public sealed unsafe class SkateLink
         var now = Environment.TickCount64;
         var showMessage = s_message.Length > 0 && now - s_messageAt < 5000;
         var resultAge = now - s_resultAt;
-        var showResult = s_resultText.Length > 0 && resultAge < ResultShown + ResultFade;
+        var shown = s_resultKind == ResultSlam ? SlamShown : ResultShown;
+        var showResult = s_resultText.Length > 0 && resultAge < shown + ResultFade;
         if (!showMessage && !s_hudSkating && !showResult)
         {
             return;
@@ -1268,30 +1449,50 @@ public sealed unsafe class SkateLink
         // The line just finished: how it went, rising and fading out.
         else if (showResult)
         {
-            var alpha = resultAge < ResultShown ? 1f : 1f - (resultAge - ResultShown) / (float)ResultFade;
+            var alpha = resultAge < shown ? 1f : 1f - (resultAge - shown) / (float)ResultFade;
             var a = (byte)Math.Clamp(255 * alpha, 0, 255);
             var rise = Math.Min(resultAge, 250) / 250f;
-            var y = h * 0.76f - h * 0.03f * rise;
+            var lines = s_resultText.Split('|');
+            var y = h * (lines.Length > 1 ? 0.70f : 0.76f) - h * 0.03f * rise;
             var (label, r, g, b) = s_resultKind switch
             {
                 ResultClean => ("CLEAN!", (byte)90, (byte)230, (byte)120),
                 ResultSketchy => ("SKETCHY", (byte)255, (byte)185, (byte)60),
                 ResultBailed => ("BAILED", (byte)255, (byte)80, (byte)70),
+                ResultSlam => ("SLAM!", (byte)255, (byte)110, (byte)40),
                 _ => ("LANDED", (byte)235, (byte)235, (byte)235),
             };
             var headline = s_resultKind == ResultBailed ? label : $"+{Thousands(s_resultPoints)}   {label}";
             canvas.Font = large;
             var hw = Measure(canvas, headline, 1.1f * ui, out var hh);
+            // Each line of detail under the headline, shrunk to fit if long.
             canvas.Font = medium;
-            var tw = Measure(canvas, s_resultText, 0.8f * ui, out var th);
-            var scale = tw > w * 0.8f ? 0.8f * ui * (w * 0.8f / tw) : 0.8f * ui;
-            tw = Measure(canvas, s_resultText, scale, out th);
-            Panel(canvas, (w - Math.Max(hw, tw)) / 2 - 24 * ui, y - 10 * ui, Math.Max(hw, tw) + 48 * ui, hh + th + 26 * ui, (byte)(a * 0.45f));
-            DrawLogo(canvas, w / 2, y + (hh + th) / 2, h * 0.17f, (byte)(a * 0.6f));
+            var widths = new float[lines.Length];
+            var scales = new float[lines.Length];
+            float textHeight = 0, widest = hw;
+            for (var i = 0; i < lines.Length; i++)
+            {
+                var size = i == 0 ? 0.8f * ui : 0.65f * ui;
+                var lw = Measure(canvas, lines[i], size, out _);
+                scales[i] = lw > w * 0.8f ? size * (w * 0.8f / lw) : size;
+                widths[i] = Measure(canvas, lines[i], scales[i], out var lh);
+                textHeight += lh + 4 * ui;
+                widest = Math.Max(widest, widths[i]);
+            }
+            Panel(canvas, (w - widest) / 2 - 24 * ui, y - 10 * ui, widest + 48 * ui, hh + textHeight + 22 * ui, (byte)(a * 0.45f));
+            DrawLogo(canvas, w / 2, y + (hh + textHeight) / 2, h * 0.17f, (byte)(a * 0.6f));
             canvas.Font = large;
             Shadowed(canvas, headline, (w - hw) / 2, y, 1.1f * ui, r, g, b, a);
             canvas.Font = medium;
-            Shadowed(canvas, s_resultText, (w - tw) / 2, y + hh + 6 * ui, scale, 255, 255, 255, a);
+            var ly = y + hh + 6 * ui;
+            for (var i = 0; i < lines.Length; i++)
+            {
+                var best = lines[i].StartsWith("NEW BEST");
+                var (lr, lg, lb) = best ? ((byte)255, (byte)214, (byte)80) : i == 0 ? ((byte)255, (byte)255, (byte)255) : ((byte)200, (byte)200, (byte)200);
+                Shadowed(canvas, lines[i], (w - widths[i]) / 2, ly, scales[i], lr, lg, lb, a);
+                Measure(canvas, lines[i], scales[i], out var lh);
+                ly += lh + 4 * ui;
+            }
         }
 
         // Messages from SkateCity itself, lower left.
@@ -1302,7 +1503,7 @@ public sealed unsafe class SkateLink
         }
     }
 
-    const int ResultShown = 2200, ResultFade = 600;
+    const int ResultShown = 2200, SlamShown = 4500, ResultFade = 600;
 
     static Texture2D? s_logo;
     static bool s_logoSearched;

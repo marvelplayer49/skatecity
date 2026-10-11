@@ -92,6 +92,7 @@ impl Config {
                 "batman_height" => c.batman_height = n.unwrap_or(c.batman_height).clamp(1.0, 2.5),
                 // Read by the game script.
                 "board_grip_material" | "board_metal_material" | "board_wheel_material" => {}
+                "sound_pop" | "sound_land" | "sound_grind" | "sound_hit" | "sound_hard_hit" | "sound_break" => {}
                 _ => crate::log!("unknown setting {key}"),
             }
         }

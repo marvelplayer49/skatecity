@@ -24,6 +24,11 @@ skater every frame.
 - Glide: press LB in the air to open the cape (Arkham's own glide), and you're put
   back on the board when you land.
 - Jump or bail off buildings and ragdoll all the way to the street.
+- Slam scoring, Hall of Meat style: every wipeout is scored from how hard you hit
+  things, with broken bones ("Fractured Skull", "Broken Left Wrist"...), fall
+  height, top speed and tumble distance, plus a session best.
+- Sound from Arkham City's own effects: ollie pops, landings, grinds, body hits
+  and bone breaks.
 - Trick display: live combo and points, a CLEAN / SKETCHY / BAILED result banner
   and a session score.
 
@@ -223,6 +228,7 @@ The installed settings file is at
 - whether to find rails,
 - Batman's size relative to the skater,
 - the board's materials,
+- which game sounds are used (or none),
 - the trick display.
 
 Restart the game after changing it.

@@ -7,6 +7,8 @@ pub const CLEAN: u32 = 1;
 pub const LANDED: u32 = 2;
 pub const SKETCHY: u32 = 3;
 pub const BAILED: u32 = 4;
+/// A wipeout's own score card.
+pub const SLAM: u32 = 5;
 
 /// A finished line, for the result banner.
 pub struct LineEnd {

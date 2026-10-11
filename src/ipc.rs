@@ -85,6 +85,22 @@ pub struct Ray {
     pub to: [f32; 3],
 }
 
+/// A sound for the game to play: what (one of the `SOUND_` kinds) and where.
+#[repr(C)]
+#[derive(Clone, Copy, Default)]
+pub struct SoundEvent {
+    pub kind: u32,
+    pub loc: [f32; 3],
+}
+
+pub const SOUND_POP: u32 = 1;
+pub const SOUND_LAND: u32 = 2;
+pub const SOUND_GRIND: u32 = 3;
+pub const SOUND_HIT: u32 = 4;
+pub const SOUND_HARD_HIT: u32 = 5;
+pub const SOUND_BREAK: u32 = 6;
+pub const SOUND_SLOTS: usize = 8;
+
 /// One piece of the board: where it goes, and its size in game units
 /// (length, width, height).
 #[repr(C)]
@@ -133,7 +149,12 @@ pub struct Reply {
     pub result_text: [u8; 128],
     /// Board pieces beyond the first eight.
     pub board_more: [BoardPart; 2],
-    pub reserved: [u32; 2],
+    /// Sounds: how many there have been in all, and the latest few, each in
+    /// slot `number % SOUND_SLOTS`.
+    pub sound_count: u32,
+    pub sound_pad: u32,
+    pub sounds: [SoundEvent; SOUND_SLOTS],
+    pub reserved: [u32; 4],
 }
 
 impl Default for Reply {
@@ -167,7 +188,10 @@ impl Default for Reply {
             result_points: 0,
             result_text: [0; 128],
             board_more: [BoardPart::default(); 2],
-            reserved: [0; 2],
+            sound_count: 0,
+            sound_pad: 0,
+            sounds: [SoundEvent::default(); SOUND_SLOTS],
+            reserved: [0; 4],
         }
     }
 }
@@ -291,6 +315,9 @@ mod tests {
         assert_eq!(std::mem::offset_of!(Reply, result_points), 800);
         assert_eq!(std::mem::offset_of!(Reply, result_text), 804);
         assert_eq!(std::mem::offset_of!(Reply, board_more), 932);
+        assert_eq!(std::mem::offset_of!(Reply, sound_count), 1004);
+        assert_eq!(std::mem::offset_of!(Reply, sounds), 1012);
+        assert_eq!(std::mem::size_of::<SoundEvent>(), 16);
         assert!(std::mem::size_of::<Reply>() <= REP_RAYS - REP);
         assert_eq!(std::mem::offset_of!(Request, frames), 140);
         assert!(REQ_NAMES + MAX_BONES * NAME_LEN <= REQ_PARENTS);
@@ -300,7 +327,7 @@ mod tests {
         assert_eq!(std::mem::offset_of!(Reply, score), 628);
         assert_eq!(std::mem::offset_of!(Reply, units_per_metre), 756);
         assert_eq!(std::mem::offset_of!(Reply, toggle_key), 760);
-        assert_eq!(std::mem::size_of::<Reply>(), 1012);
+        assert_eq!(std::mem::size_of::<Reply>(), 1156);
         assert!(REQ_HITS + MAX_RAYS * 28 <= REQ_NAMES);
         assert!(REQ_LOCALS + MAX_BONES * 32 <= REP);
         assert!(REP + std::mem::size_of::<Reply>() <= REP_RAYS);

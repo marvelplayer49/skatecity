@@ -5,6 +5,7 @@ use crate::ipc::{self, Block, BoardPart, Reply, Request};
 use crate::rig::{Joints, Rig};
 use crate::scan::{HeightMap, Scan, ScanCache, from_skate, skate_dir_to_core, to_skate};
 use crate::score::Line;
+use crate::slam::{Hit, SlamEnd, Slams};
 use crate::space::{Space, Xf, actor_xf, look_rotator, RUU_PER_RADIAN};
 use crate::worker::{self, Collision, Job, Reply as Event, Worker};
 use bevy::math::Vec3;
@@ -196,6 +197,13 @@ pub struct Mode {
     cache: ScanCache,
     /// Scales the riding ray budget down when the game's frame rate drops.
     ray_scale: f32,
+    slams: Slams,
+    best_slam: i64,
+    /// Sounds sent so far, the latest few, and the tick of the last body hit
+    /// (so a tumble isn't a wall of noise).
+    sound_count: u32,
+    sounds: [ipc::SoundEvent; ipc::SOUND_SLOTS],
+    last_hit_sound: u64,
 }
 
 impl Mode {
@@ -251,6 +259,11 @@ impl Mode {
             flips_this_air: 0,
             cache: ScanCache::default(),
             ray_scale: 1.0,
+            slams: Slams::default(),
+            best_slam: 0,
+            sound_count: 0,
+            sounds: [ipc::SoundEvent::default(); ipc::SOUND_SLOTS],
+            last_hit_sound: 0,
         }
     }
 
@@ -379,6 +392,8 @@ impl Mode {
         reply.glide_seq = self.glide_seq;
         reply.glide_end_seq = self.glide_end_seq;
         reply.glide_vel = self.glide_vel.to_array();
+        reply.sound_count = self.sound_count;
+        reply.sounds = self.sounds;
         self.issue_rays(block, &mut reply);
         if self.riding() {
             self.fill_outputs(block, req, &mut reply);
@@ -583,8 +598,78 @@ impl Mode {
             self.logged_tick = tick.tick;
             crate::log!("tick {} speed {:.2} m/s state {}", pose.tick, pose.velocity.length(), pose.state);
         }
+        self.sound_cues(&tick);
+        let (hits, end) = self.slams.update(tick.tick, &tick.state, tick.root, tick.velocity.length(), &tick.joints);
+        for hit in hits {
+            self.hit_sound(hit, tick.tick);
+        }
+        if let Some(end) = end {
+            self.show_slam(end);
+        }
         self.previous = self.current.take();
         self.current = Some(tick);
+    }
+
+    fn sound(&mut self, kind: u32, at: Vec3) {
+        let slot = self.sound_count as usize % ipc::SOUND_SLOTS;
+        self.sounds[slot] = ipc::SoundEvent { kind, loc: self.space.to_ue(at).to_array() };
+        self.sound_count = self.sound_count.wrapping_add(1);
+    }
+
+    /// Pops, landings and grinds, from the skater's state changing.
+    fn sound_cues(&mut self, tick: &Tick) {
+        let Some(prev) = self.current.as_ref().map(|t| t.state.clone()) else { return };
+        let state = &tick.state;
+        let wipeout = state.contains("Wipeout") || prev.contains("Wipeout");
+        if wipeout {
+            return;
+        }
+        let (was_air, air) = (prev.contains("Air"), state.contains("Air"));
+        if !was_air && air && tick.velocity.z > 1.0 {
+            self.sound(ipc::SOUND_POP, tick.root);
+        } else if was_air && !air {
+            self.sound(ipc::SOUND_LAND, tick.root);
+        }
+        if !prev.contains("Grind") && state.contains("Grind") {
+            self.sound(ipc::SOUND_GRIND, tick.root);
+        }
+    }
+
+    /// Body hits during a wipeout, thinned out so a tumble doesn't rattle.
+    fn hit_sound(&mut self, hit: Hit, tick: u64) {
+        let (kind, at, gap) = match hit {
+            Hit::Break(at) => (ipc::SOUND_BREAK, at, 0),
+            Hit::Hard(at) => (ipc::SOUND_HARD_HIT, at, 4),
+            Hit::Light(at) => (ipc::SOUND_HIT, at, 8),
+        };
+        if tick < self.last_hit_sound + gap {
+            return;
+        }
+        self.last_hit_sound = tick;
+        self.sound(kind, at);
+    }
+
+    /// The slam card: score, broken bones and how the fall went.
+    fn show_slam(&mut self, end: SlamEnd) {
+        if end.score < 100 && end.breaks.is_empty() {
+            return;
+        }
+        let injuries = if end.breaks.is_empty() { "Nothing broken".to_string() } else { end.breaks.join(", ") };
+        let mut text = format!(
+            "{injuries}|Fell {:.1} m   Top speed {:.1} m/s   Tumbled {:.1} m",
+            end.fall, end.top_speed, end.tumble
+        );
+        if end.score > self.best_slam {
+            self.best_slam = end.score;
+            text.push_str("|NEW BEST SLAM");
+        }
+        crate::log!("slam: {} pts, {} hits; {}", end.score, end.hits, text.replace('|', "; "));
+        if self.config.score_display {
+            self.result_seq += 1;
+            self.result_kind = crate::score::SLAM;
+            self.result_points = end.score.max(0) as u32;
+            self.result_text = text;
+        }
     }
 
     fn refresh_view(&mut self) {
@@ -620,6 +705,7 @@ impl Mode {
         self.phase = Phase::Scanning { scan, at, heading };
         self.outstanding = None;
         self.last_ground = None;
+        self.slams.reset();
     }
 
     /// If the skater is under the scanned ground, they went through it, and
@@ -663,6 +749,7 @@ impl Mode {
         self.stream = None;
         self.outstanding = None;
         self.last_ground = None;
+        self.slams.reset();
         let scan = Scan::new(ground, self.config.scan_radius, self.config.scan_spacing, self.config.thin_radius);
         self.cache.clear();
         self.phase = Phase::Scanning { scan, at: ground, heading };
@@ -778,6 +865,10 @@ impl Mode {
             return;
         }
         crate::log!("skating stopped: {why}");
+        if let Some(end) = self.slams.finish() {
+            self.show_slam(end);
+        }
+        self.slams.reset();
         if self.riding() {
             self.say("Stopped skating");
         }

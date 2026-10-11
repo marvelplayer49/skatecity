@@ -16,6 +16,7 @@ mod rails;
 mod rig;
 mod scan;
 mod score;
+mod slam;
 mod space;
 mod worker;
 
@@ -101,6 +102,7 @@ fn step_name(step: u32) -> &'static str {
         16 => "placing the board",
         17 => "reading his bone parents",
         18 => "gliding",
+        19 => "playing sounds",
         20 => "between frames (the frame had finished)",
         30 => "drawing the HUD",
         31 => "between frames (HUD drawn)",

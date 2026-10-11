@@ -109,6 +109,13 @@ impl Joints {
     pub fn get(&self, name: &str) -> Option<Vec3> {
         self.at.get(name).copied()
     }
+    /// Joints at the given points (for tests).
+    #[cfg(test)]
+    pub fn from_points(points: &[(&str, Vec3)]) -> Joints {
+        let map: HashMap<String, Vec3> = points.iter().map(|(n, p)| (n.to_string(), *p)).collect();
+        Joints { at: map.clone(), raw: map }
+    }
+
     /// The same joints turned by `rot` about `pivot` (a flip).
     pub fn rotated(&self, pivot: Vec3, rot: Quat) -> Joints {
         let turn = |m: &HashMap<String, Vec3>| m.iter().map(|(n, p)| (n.clone(), pivot + rot * (*p - pivot))).collect();
