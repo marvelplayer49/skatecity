@@ -8,3 +8,6 @@ build.log
 # Logs and debug snapshots written while playing
 *.log
 SkateCity_pose_*.json
+
+# Sound files are game audio - not shared here
+/game/sounds/

@@ -74,6 +74,10 @@ goto :fail
 :copied
 if not exist "%GAME%\Binaries\Win32\SkateCity\SkateCity.ini" copy /y "game\SkateCity.ini" "%GAME%\Binaries\Win32\SkateCity\SkateCity.ini" >nul
 copy /y "game\SkateCity.cs" "%GAME%\BmGame\Scripts\SkateCity.cs" >nul
+if not exist "%GAME%\Binaries\Win32\SkateCity\sounds" mkdir "%GAME%\Binaries\Win32\SkateCity\sounds"
+if exist "game\sounds\*.wav" copy /y "game\sounds\*.wav" "%GAME%\Binaries\Win32\SkateCity\sounds\" >nul
+rem Only one of SkateCity and SpiderCity is on at a time; this turns SkateCity on.
+if exist "switch_mods.bat" call switch_mods.bat skate
 echo.
 echo Done. Start Batman: Arkham City, load your save, wait for
 echo "SkateCity ready", then press K or click both sticks in to skate.

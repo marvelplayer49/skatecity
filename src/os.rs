@@ -158,6 +158,12 @@ mod imp {
 pub use imp::*;
 
 /// The first connected controller, if any.
+/// Player `n`'s controller: the n-th one connected (player 1 takes the first).
+pub fn player_pad(n: usize) -> Option<XInputState> {
+    (0..4).filter_map(pad).nth(n)
+}
+
+#[allow(dead_code)]
 pub fn first_pad() -> Option<XInputState> {
     (0..4).find_map(pad)
 }

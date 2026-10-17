@@ -9,6 +9,8 @@ pub const SKETCHY: u32 = 3;
 pub const BAILED: u32 = 4;
 /// A wipeout's own score card.
 pub const SLAM: u32 = 5;
+/// A challenge finished.
+pub const CHALLENGE: u32 = 6;
 
 /// A finished line, for the result banner.
 pub struct LineEnd {
@@ -83,6 +85,11 @@ impl Line {
         };
         crate::log!("line: {} - {} pts, {} (total {})", end.names, end.points, kind_name(end.kind), thousands(self.total as i64));
         Some(end)
+    }
+
+    /// Adds points earned outside a trick line (a challenge) to the total.
+    pub fn award(&mut self, points: i64) {
+        self.total += points.max(0) as f64;
     }
 
     /// Forgets a line in progress without scoring it.

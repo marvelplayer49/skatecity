@@ -154,6 +154,12 @@ pub struct Reply {
     pub sound_count: u32,
     pub sound_pad: u32,
     pub sounds: [SoundEvent; SOUND_SLOTS],
+    /// The active challenge (kind 0 for none), challenges finished, where its
+    /// marker goes (game space) and what it says.
+    pub chal_kind: u32,
+    pub chal_done: u32,
+    pub chal_loc: [f32; 3],
+    pub chal_text: [u8; 96],
     pub reserved: [u32; 4],
 }
 
@@ -191,6 +197,10 @@ impl Default for Reply {
             sound_count: 0,
             sound_pad: 0,
             sounds: [SoundEvent::default(); SOUND_SLOTS],
+            chal_kind: 0,
+            chal_done: 0,
+            chal_loc: [0.0; 3],
+            chal_text: [0; 96],
             reserved: [0; 4],
         }
     }
@@ -327,7 +337,11 @@ mod tests {
         assert_eq!(std::mem::offset_of!(Reply, score), 628);
         assert_eq!(std::mem::offset_of!(Reply, units_per_metre), 756);
         assert_eq!(std::mem::offset_of!(Reply, toggle_key), 760);
-        assert_eq!(std::mem::size_of::<Reply>(), 1156);
+        assert_eq!(std::mem::size_of::<Reply>(), 1272);
+        assert_eq!(std::mem::offset_of!(Reply, chal_kind), 1140);
+        assert_eq!(std::mem::offset_of!(Reply, chal_done), 1144);
+        assert_eq!(std::mem::offset_of!(Reply, chal_loc), 1148);
+        assert_eq!(std::mem::offset_of!(Reply, chal_text), 1160);
         assert!(REQ_HITS + MAX_RAYS * 28 <= REQ_NAMES);
         assert!(REQ_LOCALS + MAX_BONES * 32 <= REP);
         assert!(REP + std::mem::size_of::<Reply>() <= REP_RAYS);

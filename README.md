@@ -27,8 +27,15 @@ skater every frame.
 - Slam scoring, Hall of Meat style: every wipeout is scored from how hard you hit
   things, with broken bones ("Fractured Skull", "Broken Left Wrist"...), fall
   height, top speed and tumble distance, plus a session best.
-- Sound from Arkham City's own effects: ollie pops, landings, grinds, body hits
-  and bone breaks.
+- Sound: board pops, landings, grind clanks, body hits, heavy slams and bone
+  cracks. SkateCity plays 16-bit WAV files from
+  `Binaries\Win32\SkateCity\sounds` (`pop1.wav`, `land1.wav`, `grind1.wav`,
+  `hit1.wav`, `hardhit1.wav`, `break1.wav`, ... several of each are picked at
+  random). No sounds are included here; put yours in `game\sounds` before
+  running `build.bat`. Without them, Arkham City's own effects are used.
+- Park builder, like Skate 3's: place kickers, a bank, a quarter pipe, manual
+  boxes, ledges and rails anywhere in the city. They skate like real ground and
+  are saved for next time.
 - Trick display: live combo and points, a CLEAN / SKETCHY / BAILED result banner
   and a session score.
 
@@ -42,6 +49,31 @@ Skating needs an Xbox-style controller.
 | Skate | Skate 3's controls (A push, right stick flicks for tricks, LT/RT grabs, ...) |
 | Glide (in the air) | **LB**; **LB** again to drop |
 | Front flip / backflip (in the air) | Hold **RB**, push the left stick forward / back |
+
+## SpiderCity and SkateCity
+
+The two mods are kept apart: only one is on at a time. `build.bat` turns
+SkateCity on (and SpiderCity off). To switch, close the game and run
+`switch_mods.bat`; the one that's off waits in `BmGame\ModsOff`.
+
+## Park builder
+
+On foot (not on the board), press **LB + D-pad down** to open the park builder.
+A preview of the piece sits 3 m in front of Batman; walk to move it.
+
+| Action | Control |
+| --- | --- |
+| Pick the piece | **D-pad left / right** |
+| Raise / lower it | **D-pad up / down** |
+| Turn it 45° | **Y** |
+| Place it | **X** |
+| Remove the nearest piece | **B** |
+| Done (saves) | **LB + D-pad down** |
+
+Pieces: kicker, big kicker, bank, quarter pipe, manual box, ledge, flat rail and
+long rail. They're drawn as plain blocks, and they're solid only to the board
+(Batman walks through them on foot). The park is saved to
+`Binaries\Win32\SkateCity\park.txt`; delete it to clear the park.
 
 ## What you need
 

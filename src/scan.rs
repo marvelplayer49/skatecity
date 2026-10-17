@@ -41,6 +41,8 @@ struct Column {
     best: Option<f32>,
     rays: u8,
     done: bool,
+    /// A hit above `best` was passed over (an overhang, or the skater).
+    skipped: bool,
 }
 
 #[derive(Clone, Copy)]
@@ -56,8 +58,30 @@ enum Probe {
 type PointKey = (i32, i32);
 type EdgeKey = (i32, i32, u8);
 
-/// Reference heights within this (~40 cm) count as the same scan height.
-const SAME_REFERENCE: f32 = 30.0;
+/// A column an earlier scan measured.
+#[derive(Clone, Copy)]
+struct CachedColumn {
+    reference: f32,
+    best: Option<f32>,
+    skipped: bool,
+}
+
+impl CachedColumn {
+    /// Whether a scan measured from `reference` would find the same ground.
+    /// What counts as ground depends on the scan height (anything up to
+    /// HEADROOM above it), so the answer carries over when the ground found
+    /// is under both limits and either the limit didn't rise or there was
+    /// nothing overhead that a higher limit would now take instead.
+    fn still_valid(&self, reference: f32) -> bool {
+        let (old_limit, new_limit) = (self.reference + HEADROOM, reference + HEADROOM);
+        let limit_rose = new_limit > old_limit + 1.0;
+        let reaches_deeper = reference < self.reference - 1.0;
+        match self.best {
+            Some(b) => b <= old_limit && b <= new_limit && (!limit_rose || !self.skipped) && b >= reference - END_BELOW,
+            None => !reaches_deeper && (!limit_rose || !self.skipped),
+        }
+    }
+}
 
 /// What earlier scans found, so the next one only traces new ground. Each
 /// entry keeps the height the scan was measured from, since that decides
@@ -65,8 +89,9 @@ const SAME_REFERENCE: f32 = 30.0;
 #[derive(Default)]
 pub struct ScanCache {
     spacing: f32,
-    columns: HashMap<PointKey, (f32, Option<f32>)>,
-    edges: HashMap<EdgeKey, (f32, Vec<Vec3>)>,
+    columns: HashMap<PointKey, CachedColumn>,
+    /// Railing results by edge, with the ground heights at its two ends.
+    edges: HashMap<EdgeKey, (f32, f32, Vec<Vec3>)>,
 }
 
 impl ScanCache {
@@ -89,9 +114,11 @@ pub struct Scan {
     edge_next: usize,
     /// Each railing edge probed, and the railing tops found along it.
     edge_keys: Vec<EdgeKey>,
+    edge_bases: Vec<(f32, f32)>,
     edge_tops: Vec<Vec<Vec3>>,
-    /// Railing results reused from earlier scans.
-    reuse_edges: HashMap<EdgeKey, Vec<Vec3>>,
+    /// Railing results from earlier scans, with the ground heights they were
+    /// probed from.
+    reuse_edges: HashMap<EdgeKey, (f32, f32, Vec<Vec3>)>,
     pub reused: usize,
     tops: Vec<(Ray, f32, usize)>,
     thin: Vec<Vec3>,
@@ -108,6 +135,8 @@ pub struct Ground {
     pub rails: Vec<Vec<[f32; 3]>>,
     /// The ground heights the faces were made from, in core space.
     pub heights: HeightMap,
+    /// The rails again, in core space.
+    pub rails_core: Vec<Vec<Vec3>>,
 }
 
 /// The scanned ground height at each grid point (core units).
@@ -120,6 +149,18 @@ pub struct HeightMap {
 }
 
 impl HeightMap {
+    /// Every sample: where it is and the ground height there.
+    pub fn samples(&self) -> impl Iterator<Item = (Vec2, Option<f32>)> + '_ {
+        self.heights.iter().enumerate().map(|(index, h)| {
+            let (i, j) = (index % self.side, index / self.side);
+            (self.origin + Vec2::new(i as f32, j as f32) * self.spacing, *h)
+        })
+    }
+
+    pub fn spacing(&self) -> f32 {
+        self.spacing
+    }
+
     /// The ground height at the sample nearest `p`.
     pub fn at(&self, p: Vec2) -> Option<f32> {
         let i = ((p.x - self.origin.x) / self.spacing).round() as i64;
@@ -159,7 +200,7 @@ impl Scan {
         let spacing = spacing_m * METRE;
         let half = (radius_m / spacing_m).ceil() as i32;
         let side = (2 * half + 1) as usize;
-        let start = Column { from: center.z + START_ABOVE, best: None, rays: 0, done: false };
+        let start = Column { from: center.z + START_ABOVE, best: None, rays: 0, done: false, skipped: false };
         Self {
             center,
             spacing,
@@ -172,6 +213,7 @@ impl Scan {
             edges: None,
             edge_next: 0,
             edge_keys: Vec::new(),
+            edge_bases: Vec::new(),
             edge_tops: Vec::new(),
             reuse_edges: HashMap::new(),
             reused: 0,
@@ -189,13 +231,15 @@ impl Scan {
             return scan;
         }
         let side = scan.side();
-        let same = |reference: f32| (reference - center.z).abs() <= SAME_REFERENCE;
         let mut open = VecDeque::new();
         for index in 0..side * side {
+            // Right by the skater, the self-filter applies: measure afresh.
+            let near = scan.point(index % side, index / side).distance(scan.player) < SELF_RADIUS;
             match cache.columns.get(&scan.key(index % side, index / side)) {
-                Some(&(reference, best)) if same(reference) => {
+                Some(cached) if !near && cached.still_valid(center.z) => {
                     let c = &mut scan.columns[index];
-                    c.best = best;
+                    c.best = cached.best;
+                    c.skipped = cached.skipped;
                     c.done = true;
                     scan.reused += 1;
                 }
@@ -203,12 +247,7 @@ impl Scan {
             }
         }
         scan.open = open;
-        scan.reuse_edges = cache
-            .edges
-            .iter()
-            .filter(|(_, (reference, _))| same(*reference))
-            .map(|(k, (_, tops))| (*k, tops.clone()))
-            .collect();
+        scan.reuse_edges = cache.edges.clone();
         scan
     }
 
@@ -222,11 +261,12 @@ impl Scan {
         let side = self.side();
         for (index, c) in self.columns.iter().enumerate() {
             if c.done {
-                cache.columns.insert(self.key(index % side, index / side), (self.center.z, c.best));
+                let cached = CachedColumn { reference: self.center.z, best: c.best, skipped: c.skipped };
+                cache.columns.insert(self.key(index % side, index / side), cached);
             }
         }
-        for (key, tops) in self.edge_keys.iter().zip(&self.edge_tops) {
-            cache.edges.insert(*key, (self.center.z, tops.clone()));
+        for ((key, (ha, hb)), tops) in self.edge_keys.iter().zip(&self.edge_bases).zip(&self.edge_tops) {
+            cache.edges.insert(*key, (*ha, *hb, tops.clone()));
         }
         let (cx, cy) = self.key(side / 2, side / 2);
         let reach = self.half * 3;
@@ -318,7 +358,11 @@ impl Scan {
                                 c.best = Some(p.z);
                                 if p.z <= reference + HEADROOM {
                                     c.done = true;
+                                } else {
+                                    c.skipped = true;
                                 }
+                            } else {
+                                c.skipped = true;
                             }
                         }
                     }
@@ -372,14 +416,20 @@ impl Scan {
                     let base = ha.max(hb);
                     let (gx, gy) = self.key(i as usize, j as usize);
                     let key = (gx, gy, di as u8);
-                    if let Some(tops) = self.reuse_edges.get(&key) {
-                        self.thin.extend(tops.iter().copied());
-                        self.edge_keys.push(key);
-                        self.edge_tops.push(tops.clone());
-                        continue;
+                    // Same ground at both ends: the railings found there before stand.
+                    if let Some((ca, cb, tops)) = self.reuse_edges.get(&key) {
+                        if (ca - ha).abs() < 0.5 && (cb - hb).abs() < 0.5 {
+                            let tops = tops.clone();
+                            self.thin.extend(tops.iter().copied());
+                            self.edge_keys.push(key);
+                            self.edge_bases.push((ha, hb));
+                            self.edge_tops.push(tops);
+                            continue;
+                        }
                     }
                     let edge = self.edge_keys.len();
                     self.edge_keys.push(key);
+                    self.edge_bases.push((ha, hb));
                     self.edge_tops.push(Vec::new());
                     let pa = self.point(i as usize, j as usize);
                     let pb = self.point((i + di) as usize, (j + dj) as usize);
@@ -440,6 +490,7 @@ impl Scan {
                 }
             }
         }
+        let rails: Vec<Vec<Vec3>> = self.grid_rails().into_iter().chain(chain_points(self.thin.clone(), self.spacing)).collect();
         Ground {
             heights: HeightMap {
                 origin: self.point(0, 0),
@@ -450,12 +501,8 @@ impl Scan {
             center: self.center,
             skate: faces.iter().map(|f| f.map(|p| to_skate(p).to_array())).collect(),
             inches: faces.iter().map(|f| f.map(|p| p * INCHES_PER_UNIT)).collect(),
-            rails: self
-                .grid_rails()
-                .into_iter()
-                .chain(chain_points(self.thin.clone(), self.spacing))
-                .map(|rail| rail.into_iter().map(|p| to_skate(p).to_array()).collect())
-                .collect(),
+            rails: rails.iter().map(|rail| rail.iter().map(|p| to_skate(*p).to_array()).collect()).collect(),
+            rails_core: rails,
         }
     }
 
@@ -689,9 +736,49 @@ mod tests {
         run(&mut fresh, ground);
         assert_eq!(second.ground().skate.len(), fresh.ground().skate.len());
         assert_eq!(second.ground().rails.len(), fresh.ground().rails.len());
-        // A scan from a different height doesn't trust the cache.
+        // From higher up (riding a ledge), open ground with nothing overhead
+        // still reads the same, so it's reused.
         let high = Scan::with_cache(Vec3::new(70.0, 0.0, 300.0), 8.0, 0.5, 2.0, &cache);
-        assert_eq!(high.reused, 0);
+        assert!(high.reused * 2 > high.columns.len());
+    }
+
+    #[test]
+    fn reuse_respects_what_counts_as_an_overhang() {
+        // A roof 3 m up over part of the area; the floor at 0 everywhere.
+        let roof = |p: Vec2| p.x > 100.0 && p.x < 200.0;
+        let world = |a: Vec3, b: Vec3| -> Option<Vec3> {
+            if (a.z - b.z).abs() < 1.0 {
+                return None;
+            }
+            if roof(a.truncate()) && a.z > 210.0 {
+                return Some(a.truncate().extend(210.0));
+            }
+            (a.z >= 0.0).then(|| a.truncate().extend(0.0))
+        };
+        let run_world = |scan: &mut Scan| {
+            for _ in 0..10_000 {
+                if scan.done() {
+                    return;
+                }
+                let rays = scan.batch(500);
+                let hits: Vec<Option<Vec3>> = rays.iter().map(|(a, b)| world(*a, *b)).collect();
+                scan.absorb(&hits);
+            }
+        };
+        let mut low = Scan::new(Vec3::ZERO, 8.0, 0.5, 0.0);
+        run_world(&mut low);
+        let mut cache = ScanCache::default();
+        low.store(&mut cache);
+        // From 1.5 m up the roof is within reach as ground: a fresh scan
+        // stands on it, and so must the cached one.
+        let center = Vec3::new(0.0, 0.0, 105.0);
+        let mut cached = Scan::with_cache(center, 8.0, 0.5, 0.0, &cache);
+        run_world(&mut cached);
+        let mut fresh = Scan::new(center, 8.0, 0.5, 0.0);
+        run_world(&mut fresh);
+        let heights = |scan: &Scan| scan.columns.iter().map(|c| c.best).collect::<Vec<_>>();
+        assert_eq!(heights(&cached), heights(&fresh));
+        assert!(cached.reused > 0);
     }
 
     #[test]

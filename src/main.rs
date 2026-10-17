@@ -7,6 +7,7 @@
 //! answers with where Batman, his bones, the board and the camera go.
 #![windows_subsystem = "windows"]
 
+mod challenge;
 mod config;
 mod ipc;
 mod log;
@@ -22,18 +23,32 @@ mod worker;
 
 use std::path::PathBuf;
 
+/// Which local player this helper skates for (0 is player 1): the game
+/// starts one helper per player in split-screen co-op.
+fn player() -> usize {
+    std::env::args().nth(2).and_then(|a| a.parse().ok()).unwrap_or(0).min(3)
+}
+
+/// Names for player `p`'s files and shared memory: player 1 keeps the
+/// plain names, others get a _p2/_p3/_p4 suffix.
+pub fn suffix(p: usize) -> String {
+    if p == 0 { String::new() } else { format!("_p{}", p + 1) }
+}
+
 fn main() {
     let dir = std::env::current_exe().ok().and_then(|p| p.parent().map(PathBuf::from)).unwrap_or_default();
-    log::open(&dir.join("SkateCity.log"));
-    crate::log!("SkateCity {} starting", env!("CARGO_PKG_VERSION"));
+    log::open(&dir.join(format!("SkateCity{}.log", suffix(player()))));
+    crate::log!("SkateCity {} starting for player {}", env!("CARGO_PKG_VERSION"), player() + 1);
     if let Err(e) = run(&dir) {
         crate::log!("stopped: {e}");
     }
 }
 
 fn run(dir: &std::path::Path) -> Result<(), String> {
-    let pid: u32 = std::env::args().nth(1).and_then(|a| a.parse().ok()).ok_or("usage: SkateCity <game process id>")?;
-    let base = format!("Local\\SkateCity_{pid}");
+    let pid: u32 =
+        std::env::args().nth(1).and_then(|a| a.parse().ok()).ok_or("usage: SkateCity <game process id> [player]")?;
+    let player = player();
+    let base = format!("Local\\SkateCity_{pid}{}", suffix(player));
     let shared = os::open_shared(&base)?;
     let requests = os::Event::open(&format!("{base}_req"))?;
     let replies = os::Event::open(&format!("{base}_rep"))?;
@@ -41,7 +56,7 @@ fn run(dir: &std::path::Path) -> Result<(), String> {
     let block = unsafe { ipc::Block::new(shared.0) };
     let config = config::Config::load(&dir.join("SkateCity.ini"));
     crate::log!("attached to the game (process {pid}); settings {config:?}");
-    let mut mode = mode::Mode::new(config);
+    let mut mode = mode::Mode::new(config, player);
     let mut last_seq = 0u32;
     let mut beat = std::time::Instant::now();
     loop {

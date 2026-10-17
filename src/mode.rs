@@ -6,6 +6,7 @@ use crate::rig::{Joints, Rig};
 use crate::scan::{HeightMap, Scan, ScanCache, from_skate, skate_dir_to_core, to_skate};
 use crate::score::Line;
 use crate::slam::{Hit, SlamEnd, Slams};
+use crate::challenge::{Challenges, Event as ChallengeEvent};
 use crate::space::{Space, Xf, actor_xf, look_rotator, RUU_PER_RADIAN};
 use crate::worker::{self, Collision, Job, Reply as Event, Worker};
 use bevy::math::Vec3;
@@ -14,6 +15,8 @@ use skate_host::bridge::{InputFrame, Pose};
 const BOTH_STICKS: u16 = 0x0040 | 0x0080;
 /// LB: glide when in the air.
 const GLIDE_BUTTON: u16 = 0x0100;
+/// D-pad right: a different challenge.
+const SKIP_BUTTON: u16 = 0x0008;
 /// RB plus the left stick forward or back in the air: a front or back flip.
 const FLIP_BUTTON: u16 = 0x0200;
 const FLIP_STICK: i16 = 20000;
@@ -204,10 +207,14 @@ pub struct Mode {
     sound_count: u32,
     sounds: [ipc::SoundEvent; ipc::SOUND_SLOTS],
     last_hit_sound: u64,
+    challenges: Challenges,
+    skip_held: bool,
+    /// Which local player this is (0 is player 1).
+    player: usize,
 }
 
 impl Mode {
-    pub fn new(config: Config) -> Self {
+    pub fn new(config: Config, player: usize) -> Self {
         let space = Space::new(if config.units_per_metre > 0.0 { config.units_per_metre } else { DEFAULT_UNITS_PER_METRE });
         Self {
             config,
@@ -264,6 +271,9 @@ impl Mode {
             sound_count: 0,
             sounds: [ipc::SoundEvent::default(); ipc::SOUND_SLOTS],
             last_hit_sound: 0,
+            challenges: Challenges::default(),
+            skip_held: false,
+            player,
         }
     }
 
@@ -303,7 +313,7 @@ impl Mode {
         // Toggle: the game counts presses of the toggle key; both sticks
         // clicked together are read here.
         let focused = crate::os::game_focused(req.pid);
-        let pad = if focused { crate::os::first_pad() } else { None };
+        let pad = if focused { crate::os::player_pad(self.player) } else { None };
         let buttons = pad.map_or(0, |p| p.pad.buttons);
         let sticks = buttons & BOTH_STICKS == BOTH_STICKS;
         let mut pressed = sticks && !self.sticks_held;
@@ -318,6 +328,7 @@ impl Mode {
         if req.world != self.world {
             self.world = req.world;
             self.cache.clear();
+            self.challenges.reset();
             self.stop("the game loaded a new area");
         }
         let pawn = req.flags & ipc::PAWN_VALID != 0;
@@ -370,6 +381,13 @@ impl Mode {
             self.refresh_view();
             let (stick, held) = pad.map_or((0, false), |p| (p.pad.ly, p.pad.buttons & FLIP_BUTTON != 0));
             self.update_flip(req.dt.clamp(0.0, 0.1), held, stick);
+            let skip_down = buttons & SKIP_BUTTON != 0;
+            let skip = skip_down && !self.skip_held;
+            self.skip_held = skip_down;
+            if let Some((state, root)) = self.current.as_ref().map(|t| (t.state.clone(), t.root)) {
+                let events = self.challenges.update(req.dt.clamp(0.0, 0.1), &state, root, skip);
+                self.challenge_events(events);
+            }
             self.stream_ground();
             self.catch_fall();
         }
@@ -407,6 +425,14 @@ impl Mode {
             }
             reply.hud_total = self.line.total().max(0) as u32;
             reply.result_seq = self.result_seq;
+            if self.riding() {
+                if let Some((kind, at, text)) = self.current.as_ref().and_then(|t| self.challenges.hud(t.root)) {
+                    reply.chal_kind = kind as u32;
+                    reply.chal_loc = self.space.to_ue(at).to_array();
+                    ipc::write_text(&mut reply.chal_text, &text);
+                }
+                reply.chal_done = self.challenges.done;
+            }
             reply.result_kind = self.result_kind;
             reply.result_points = self.result_points;
             ipc::write_text(&mut reply.result_text, &self.result_text);
@@ -563,6 +589,10 @@ impl Mode {
                             self.result_kind = end.kind;
                             self.result_points = end.points.max(0) as u32;
                             self.result_text = end.names;
+                            let bailed = end.kind == crate::score::BAILED;
+                            if let Some(event) = self.challenges.line_ended(end.points, bailed) {
+                                self.challenge_events(vec![event]);
+                            }
                         }
                     }
                     self.alpha = alpha;
@@ -649,9 +679,30 @@ impl Mode {
         self.sound(kind, at);
     }
 
+    fn challenge_events(&mut self, events: Vec<ChallengeEvent>) {
+        for event in events {
+            match event {
+                ChallengeEvent::Message(text) => self.say(text),
+                ChallengeEvent::Completed { title, points } => {
+                    crate::log!("challenge done: {title}, {points} pts");
+                    self.line.award(points);
+                    self.result_seq += 1;
+                    self.result_kind = crate::score::CHALLENGE;
+                    self.result_points = points.max(0) as u32;
+                    self.result_text = format!("{title}|Challenges done: {}", self.challenges.done);
+                }
+            }
+        }
+    }
+
     /// The slam card: score, broken bones and how the fall went.
     fn show_slam(&mut self, end: SlamEnd) {
-        if end.score < 100 && end.breaks.is_empty() {
+        crate::log!(
+            "wipeout: {} pts, {} hits, {} broken, fell {:.1} m, top {:.1} m/s, tumbled {:.1} m",
+            end.score, end.hits, end.breaks.len(), end.fall, end.top_speed, end.tumble
+        );
+        // Tipping over at a standstill isn't a slam.
+        if end.hits == 0 && end.breaks.is_empty() && end.fall < 0.5 && end.top_speed < 2.0 {
             return;
         }
         let injuries = if end.breaks.is_empty() { "Nothing broken".to_string() } else { end.breaks.join(", ") };
@@ -851,6 +902,7 @@ impl Mode {
         }
         self.installed_at = Some(ground.center);
         self.heights = Some(ground.heights.clone());
+        self.challenges.set_world(ground.heights.clone(), ground.rails_core.clone());
         self.installs += 1;
         self.epoch += 1;
         let collision = Collision { skate: ground.skate, inches: ground.inches, grid_rails: ground.rails, rails: self.config.rails };
@@ -915,7 +967,8 @@ impl Mode {
             }
             self.installed_at = Some(ground.center);
             self.heights = Some(ground.heights.clone());
-        self.installs += 1;
+            self.challenges.set_world(ground.heights.clone(), ground.rails_core.clone());
+            self.installs += 1;
             let collision = Collision { skate: ground.skate, inches: ground.inches, grid_rails: ground.rails, rails: self.config.rails };
             if let Some(w) = &self.worker {
                 let _ = w.send.send(Job::Collision(collision));
@@ -961,7 +1014,7 @@ impl Mode {
                     if self.snapshots < 12 && self.ride_frames % 90 == 45 {
                         self.snapshots += 1;
                         let state = self.current.as_ref().map_or(String::new(), |t| t.state.clone());
-                        snapshot(self.snapshots, &state, rig, &core_component, &pose, &view.joints, &view.board);
+                        snapshot(self.player, self.snapshots, &state, rig, &core_component, &pose, &view.joints, &view.board);
                     }
                     let atoms: Vec<ipc::Atom> = pose.iter().map(|x| s.xf_to_ue(x).to_atom()).collect();
                     block.write_bones(&atoms);
@@ -1048,7 +1101,17 @@ fn board_parts(board: &[(&'static str, Vec3)], s: &Space) -> Option<Vec<BoardPar
 
 /// Writes the skater's joints and Batman's posed bones (core space) to
 /// SkateCity_pose_N.json next to the helper, for checking the retarget.
-fn snapshot(n: u32, state: &str, rig: &Rig, component: &Xf, pose: &[Xf], joints: &Joints, board: &[(&'static str, Vec3)]) {
+#[allow(clippy::too_many_arguments)]
+fn snapshot(
+    player: usize,
+    n: u32,
+    state: &str,
+    rig: &Rig,
+    component: &Xf,
+    pose: &[Xf],
+    joints: &Joints,
+    board: &[(&'static str, Vec3)],
+) {
     let v = |p: Vec3| format!("[{:.2},{:.2},{:.2}]", p.x, p.y, p.z);
     let q = |r: bevy::math::Quat| format!("[{:.4},{:.4},{:.4},{:.4}]", r.x, r.y, r.z, r.w);
     let mut out = String::from("{");
@@ -1078,7 +1141,7 @@ fn snapshot(n: u32, state: &str, rig: &Rig, component: &Xf, pose: &[Xf], joints:
         .join(",");
     out += "]}";
     let dir = std::env::current_exe().ok().and_then(|p| p.parent().map(std::path::PathBuf::from)).unwrap_or_default();
-    let path = dir.join(format!("SkateCity_pose_{n}.json"));
+    let path = dir.join(format!("SkateCity{}_pose_{n}.json", crate::suffix(player)));
     match std::fs::write(&path, out) {
         Ok(()) => crate::log!("pose snapshot {n} ({state}) written"),
         Err(e) => crate::log!("could not write {}: {e}", path.display()),
